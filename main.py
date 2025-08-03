@@ -12,41 +12,33 @@ import os
 import random
 import sys
 import time
-import json  # **Added Import**
+import json
 
-# **Import the new function from readLegacy**
+# Import configuration from optConfig
+from optConfig import (
+    TIMEOUT, HFSS_LAUNCH_INTERVAL, COST_ERROR, P, NGEN, CXPB, MUTPB, NUM_PROCESSES,
+    get_number_of_objectives
+)
+
+# Import the function from readLegacy
 from readLegacy import generate_first_generation
 
 random.seed("seed1")
 os.chdir(os.path.dirname(__file__))
 
-# Problem definition will be set after fetching parameters
-NOBJ = 5  # Number of objectives: max_dB_S11 and db_Gain_Tot
+# Get the number of objectives from configuration
+NOBJ = get_number_of_objectives()
 
-# Algorithm parameters
-P = 6  # Number of reference points per objective
+# Calculate population size based on number of objectives
 H = factorial(NOBJ + P - 1) / (factorial(P) * factorial(NOBJ - 1))
 MU = int(H + (4 - H % 4))  # Population size, adjusted to be a multiple of 4
-"""
-NOBJ = 5, P = 6, MU = 212
-NOBJ = 5, P = 5, MU = 128
-NOBJ = 4, P = 8, MU = 168
-NOBJ = 3, P = 15, MU = 140
-NOBJ = 2, P = 100, MU = 104
-"""
-NGEN = 50  # Number of generations
-CXPB = 1.0  # Crossover probability
-MUTPB = 1.0  # Mutation probability
 
-COST_WHEN_ERROR = [1.1] * NOBJ  # Cost values assigned when an error occurs
+COST_WHEN_ERROR = [COST_ERROR] * NOBJ  # Cost values assigned when an error occurs
 
 # Create uniform reference points for NSGA-III
 ref_points = tools.uniform_reference_points(NOBJ, P)
 
-TIMEOUT = 3600  # Timeout for each HFSS simulation in seconds
-HFSS_LAUNCH_INTERVAL = 15.0
-
-# **Added Parameter File Path**
+# Parameter File Path
 PARAM_FILE = 'parameters.json'
 
 ####################################################################################
@@ -123,14 +115,37 @@ def hfssCost_subprocess(inVals: list, inNames: list, units: list, var_mins: list
         )
         return COST_WHEN_ERROR
 
+    # Enhanced error logging
+    stdout_content = subOutput.stdout.decode() if subOutput.stdout else ""
+    stderr_content = subOutput.stderr.decode() if subOutput.stderr else ""
+    
+    # Log to a file for debugging
+    with open('subprocess_debug.log', 'a') as f:
+        f.write(f"==== SUBPROCESS CALL ====\n")
+        f.write(f"Time: {time.strftime('%H:%M:%S', time.localtime())}\n")
+        f.write(f"Command: python hfssOpt.py {str(inVals)} {str(inNames)} {str(TIMEOUT)} {str(units)} {str(var_mins)} {str(var_maxs)}\n")
+        f.write(f"==== STDOUT ====\n{stdout_content}\n")
+        f.write(f"==== STDERR ====\n{stderr_content}\n")
+        f.write("================\n\n")
+
     # Parse the output from hfssOpt.py
     try:
-        costList = ast.literal_eval(subOutput.stdout.decode())
+        # Try to handle empty output case
+        if not stdout_content.strip():
+            print("Error: Empty output from subprocess")
+            hfssOpt.hfss_export([0]*len(units),
+                                COST_WHEN_ERROR,
+                                ["subprocess_empty_output_start", "subprocess_empty_output_end"],
+                                "Empty output from subprocess")
+            return COST_WHEN_ERROR
+            
+        costList = ast.literal_eval(stdout_content)
     except Exception as e:
+        print(f"Parse error: {e}, stdout: {stdout_content}, stderr: {stderr_content}")
         hfssOpt.hfss_export([0]*len(units),
                             COST_WHEN_ERROR,
                             ["subprocess_parse_error_start", "subprocess_parse_error_end"],
-                            "costList cannot be decoded")
+                            f"costList cannot be decoded: {str(e)}")
         return COST_WHEN_ERROR
 
     if isinstance(costList, list) and all(isinstance(x, (float, int)) for x in costList):
@@ -237,13 +252,11 @@ def main():
     logbook = tools.Logbook()
     logbook.header = ["gen", "evals", "avg", "std", "min", "max"]
 
-    # =========================================================================
     # Generate the initial population, possibly from legacy.csv if it exists
-    # =========================================================================
     if os.path.exists('legacy.csv'):
         try:
             legacy_init = generate_first_generation(
-                MU, param_file=PARAM_FILE, legacy_file='legacy.csv',legacy_ratio=0.5
+                MU, param_file=PARAM_FILE, legacy_file='legacy.csv', legacy_ratio=0.5
             )
             if legacy_init is not None and len(legacy_init) == MU:
                 # Convert each list of floats into a DEAP Individual
@@ -298,7 +311,7 @@ def main():
 
 if __name__ == "__main__":
     # Initialize multiprocessing pool
-    pool = Pool(6)
+    pool = Pool(NUM_PROCESSES)
     toolbox.register("map", pool.map)
 
     # Run the optimization
