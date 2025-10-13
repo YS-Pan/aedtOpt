@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from cycler import cycler
 from datetime import datetime
 import math  # For mathematical operations
@@ -97,6 +98,16 @@ def is_pareto_efficient(costs):
     return is_efficient
 
 
+def gaussian_kernel_smoother(x_data, y_data, fine_x, sigma):
+    """Compute Gaussian kernel smoothed values on fine_x."""
+    smoothed = np.zeros_like(fine_x)
+    for i, fx in enumerate(fine_x):
+        weights = np.exp(- (x_data - fx)**2 / (2 * sigma**2))
+        if np.sum(weights) > 0:
+            smoothed[i] = np.sum(weights * y_data) / np.sum(weights)
+    return smoothed
+
+
 def plot_costs(data, cost_columns, pareto_mask, markersize_ordinary, alpha_ordinary):
     """
     Plots the individual and combined costs from the optimization results using scatter plots,
@@ -186,6 +197,21 @@ def plot_costs(data, cost_columns, pareto_mask, markersize_ordinary, alpha_ordin
     # Create a second y-axis for combined cost
     ax2 = ax1.twinx()
 
+    # Add local average line for combined cost using Line2D to bypass prop_cycle
+    if num_rows > 0:
+        fine_x = np.linspace(1, num_rows, 500)  # Reduced to 500 points to minimize density/artifacts
+        total_points = num_rows
+        window_points = max(1, int(0.03 * total_points))
+        avg_spacing = (num_rows - 1) / (num_rows - 1) if num_rows > 1 else 1
+        sigma = (window_points * avg_spacing) / 3.0
+        local_avg = gaussian_kernel_smoother(x, combined_cost, fine_x, sigma)
+        
+        # Create a Line2D object directly to bypass any prop_cycle issues
+        avg_line = Line2D(fine_x, local_avg, color='black', linewidth=10, 
+                         alpha=0.3, linestyle='-', marker='', markersize=0)
+        ax2.add_line(avg_line)
+        avg_line.set_zorder(0)  # Ensure it's below other elements
+
     # Ordinary combined costs
     ax2.scatter(
         x[~pareto_mask],
@@ -233,7 +259,7 @@ def plot_costs(data, cost_columns, pareto_mask, markersize_ordinary, alpha_ordin
     unique = dict(zip(labels1 + labels2, handles1 + handles2))
     ax1.legend(unique.values(), unique.keys(), loc='lower left', frameon=True, fontsize=10)
 
-    plt.title('Optimization Costs Visualization with Pareto Front Highlighted')
+    plt.title('Optimization Costs')
     plt.tight_layout()
 
     # Generate filename with current date and time
