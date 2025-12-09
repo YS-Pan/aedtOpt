@@ -14,7 +14,7 @@ from functools import partial
 
 # Import configuration from optConfig
 from optConfig import (
-    PROJECT_NAME, DESIGN_NAME, TOLERANCE, COST_ERROR,
+    PROJECT_NAME, DESIGN_NAME, TOLERANCE, COST_ERROR,CORE_PER_PROCESS,SWEEP_PER_PROCESS,
     get_cost_calculation_actions, get_modification_actions, generate_csv_headers
 )
 
@@ -324,7 +324,7 @@ def hfss_cost(
 
         # Run the simulation
         try:
-            success = hfssApp.analyze_setup(hfssApp.setup_names[0])
+            success = hfssApp.analyze_setup(name=hfssApp.setup_names[0],cores=CORE_PER_PROCESS,tasks=SWEEP_PER_PROCESS,use_auto_settings=False)
             if not success:
                 raise Exception("Simulation failed to run successfully.")
         except Exception as e:
